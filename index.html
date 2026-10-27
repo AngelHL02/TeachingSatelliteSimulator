@@ -1,0 +1,869 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Teaching Satellite (CanSat) 3D Simulation</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Chart.js for real-time telemetry streaming -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- Three.js and OrbitControls -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f8fafc;
+            color: #0f172a;
+            overflow: hidden;
+        }
+        .font-orbitron {
+            font-family: 'Orbitron', sans-serif;
+        }
+        #canvas-container {
+            width: 100%;
+            height: 100%;
+            position: relative;
+            background-image: 
+                linear-gradient(to right, rgba(148, 163, 184, 0.2) 1px, transparent 1px),
+                linear-gradient(to bottom, rgba(148, 163, 184, 0.2) 1px, transparent 1px);
+            background-size: 32px 32px;
+        }
+        /* Custom scrollbars */
+        ::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #f1f5f9;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #cbd5e1;
+            border-radius: 3px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #94a3b8;
+        }
+        .glass-panel {
+            background: rgba(255, 255, 255, 0.92);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(203, 213, 225, 0.9);
+            box-shadow: 0 4px 12px -2px rgba(0, 0, 0, 0.06), 0 2px 4px -1px rgba(0, 0, 0, 0.03);
+        }
+        /* Artificial Horizon Stylings */
+        #horizon-container {
+            width: 90px;
+            height: 90px;
+            border-radius: 50%;
+            border: 2px solid #0284c7;
+            position: relative;
+            overflow: hidden;
+            background: #e2e8f0;
+        }
+        #horizon-sky {
+            position: absolute;
+            top: -50%;
+            left: -50%;
+            width: 200%;
+            height: 200%;
+            background: linear-gradient(to bottom, #38bdf8 50%, #d97706 50%);
+            transform-origin: center center;
+            transition: transform 0.05s linear;
+        }
+        #horizon-ring {
+            position: absolute;
+            inset: 0;
+            border-radius: 50%;
+            box-shadow: inset 0 0 8px rgba(0,0,0,0.3);
+            pointer-events: none;
+        }
+        #horizon-crosshair {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 36px;
+            height: 2px;
+            background: #ef4444;
+            pointer-events: none;
+        }
+        #horizon-crosshair::before {
+            content: '';
+            position: absolute;
+            left: 50%;
+            top: -4px;
+            transform: translateX(-50%);
+            width: 2px;
+            height: 10px;
+            background: #ef4444;
+        }
+    </style>
+</head>
+<body class="h-screen w-screen flex flex-col overflow-hidden select-none">
+
+    <!-- Header Navigation -->
+    <header class="h-14 bg-white border-b border-slate-200 px-4 flex items-center justify-between shrink-0 z-20 shadow-sm">
+        <div class="flex items-center space-x-3">
+            <div class="bg-sky-100 text-sky-700 p-2 rounded-xl border border-sky-200">
+                <i class="fa-solid fa-satellite text-lg"></i>
+            </div>
+            <div>
+                <h1 class="font-orbitron text-sm font-bold tracking-wider text-slate-800">TEACHING SATELLITE (CANSAT) SIMULATOR</h1>
+                <p class="text-xs text-slate-500 font-medium">Interactive Gyroscope & Attitude Telemetry Lab</p>
+            </div>
+        </div>
+        <div class="flex items-center space-x-2">
+            <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                <span class="w-2 h-2 mr-1.5 bg-emerald-500 rounded-full animate-pulse"></span> LIVE SENSOR STREAMING
+            </span>
+            <button id="btn-guide" class="px-3 py-1.5 text-xs bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-lg border border-slate-300 transition flex items-center gap-1.5">
+                <i class="fa-solid fa-graduation-cap text-sky-600"></i> STEM Guide
+            </button>
+        </div>
+    </header>
+
+    <!-- Split Screen Main Layout -->
+    <div class="flex-1 flex flex-col lg:flex-row overflow-hidden relative">
+
+        <!-- LEFT PANEL: 60% Width 3D Canvas Viewport -->
+        <div id="canvas-container" class="w-full lg:w-[60%] h-1/2 lg:h-full relative cursor-grab active:cursor-grabbing border-b lg:border-b-0 lg:border-r border-slate-200">
+            
+            <!-- Top Controls Overlay -->
+            <div class="absolute top-4 left-4 z-10 flex flex-col gap-2">
+                <div class="glass-panel p-1.5 rounded-xl flex gap-1">
+                    <button id="mode-rotate" class="px-3 py-1.5 rounded-lg text-xs font-bold bg-sky-600 text-white transition flex items-center gap-1.5 shadow">
+                        <i class="fa-solid fa-arrows-spin"></i> Rotate CanSat
+                    </button>
+                    <button id="mode-orbit" class="px-3 py-1.5 rounded-lg text-xs font-bold bg-slate-100 hover:bg-slate-200 text-slate-700 transition flex items-center gap-1.5 border border-slate-300">
+                        <i class="fa-solid fa-camera"></i> Orbit Camera
+                    </button>
+                </div>
+                <div class="glass-panel p-2.5 rounded-xl text-xs text-slate-700 max-w-xs space-y-1">
+                    <div class="flex items-center gap-1.5 text-sky-700 font-bold">
+                        <i class="fa-solid fa-circle-info"></i> <span id="interaction-hint-title">Mode: Rotate CanSat</span>
+                    </div>
+                    <p id="interaction-hint-desc" class="text-[11px] text-slate-600 font-medium leading-tight">Left-click and drag directly on the CanSat to rotate! Drag horizontally to turn Yaw (Z), drag vertically to adjust Pitch (Y).</p>
+                </div>
+            </div>
+
+            <!-- Bottom Control Toolbar -->
+            <div class="absolute bottom-4 left-4 z-10 flex flex-wrap gap-2">
+                <button id="btn-demo-yaw" class="px-3 py-2 bg-sky-700 hover:bg-sky-800 text-white font-semibold rounded-xl text-xs transition flex items-center gap-1.5 shadow-md">
+                    <i class="fa-solid fa-play"></i> Demo Z-Axis Spin (Yaw)
+                </button>
+                <button id="btn-demo-roll" class="px-3 py-2 bg-white/95 hover:bg-slate-100 text-slate-700 font-semibold rounded-xl text-xs border border-slate-300 transition flex items-center gap-1.5 shadow-sm">
+                    <i class="fa-solid fa-rotate-right text-red-600"></i> Demo Roll
+                </button>
+                <button id="btn-demo-pitch" class="px-3 py-2 bg-white/95 hover:bg-slate-100 text-slate-700 font-semibold rounded-xl text-xs border border-slate-300 transition flex items-center gap-1.5 shadow-sm">
+                    <i class="fa-solid fa-arrows-up-down text-emerald-600"></i> Demo Pitch
+                </button>
+                <button id="btn-reset" class="px-3 py-2 bg-white/95 hover:bg-slate-100 text-slate-700 font-semibold rounded-xl text-xs border border-slate-300 transition flex items-center gap-1.5 shadow-sm">
+                    <i class="fa-solid fa-rotate-left text-sky-600"></i> Reset Orientation
+                </button>
+                <button id="toggle-frame" class="px-3 py-2 bg-white/95 hover:bg-slate-100 text-slate-700 font-semibold rounded-xl text-xs border border-slate-300 transition flex items-center gap-1.5 shadow-sm">
+                    <i class="fa-solid fa-cube text-indigo-600"></i> Toggle Frame (框)
+                </button>
+            </div>
+
+            <!-- Coordinate Axes Legend -->
+            <div class="absolute bottom-4 right-4 z-10 glass-panel p-2.5 rounded-xl border border-slate-300 text-xs">
+                <div class="font-bold text-slate-800 mb-1 text-[11px]">Axis Convention</div>
+                <div class="flex items-center gap-3 text-[11px] font-semibold">
+                    <span class="flex items-center gap-1 text-blue-700"><span class="w-2.5 h-2.5 rounded-full bg-blue-600"></span> Z: Yaw</span>
+                    <span class="flex items-center gap-1 text-red-700"><span class="w-2.5 h-2.5 rounded-full bg-red-500"></span> X: Roll</span>
+                    <span class="flex items-center gap-1 text-emerald-700"><span class="w-2.5 h-2.5 rounded-full bg-emerald-600"></span> Y: Pitch</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- RIGHT PANEL: 40% Width Live Telemetry Dashboard -->
+        <aside class="w-full lg:w-[40%] h-1/2 lg:h-full bg-white flex flex-col z-10 overflow-y-auto shrink-0 divide-y divide-slate-200">
+            
+            <!-- Live Readouts Header & Gauges -->
+            <div class="p-4 space-y-3">
+                <div class="flex items-center justify-between">
+                    <h2 class="font-orbitron text-xs font-bold tracking-wider text-slate-800 uppercase flex items-center gap-2">
+                        <i class="fa-solid fa-gauge-high text-sky-600"></i> Live Telemetry Output
+                    </h2>
+                    <span class="text-[10px] bg-sky-50 text-sky-700 border border-sky-200 px-2 py-0.5 rounded font-mono font-bold">REAL-TIME SYNC</span>
+                </div>
+
+                <!-- Sensor Values Display -->
+                <div class="grid grid-cols-3 gap-2">
+                    <!-- Yaw (Z Axis) -->
+                    <div class="bg-blue-50/80 p-2.5 rounded-xl border border-blue-200 flex flex-col items-center">
+                        <span class="text-[10px] font-bold text-blue-700 uppercase tracking-wider">Z - Yaw</span>
+                        <span id="val-yaw" class="font-orbitron text-lg font-bold text-slate-900 my-0.5">0.0°</span>
+                        <span id="acc-z" class="text-[10px] font-mono font-bold text-blue-700">9.81 m/s²</span>
+                    </div>
+                    <!-- Roll (X Axis) -->
+                    <div class="bg-red-50/80 p-2.5 rounded-xl border border-red-200 flex flex-col items-center">
+                        <span class="text-[10px] font-bold text-red-700 uppercase tracking-wider">X - Roll</span>
+                        <span id="val-roll" class="font-orbitron text-lg font-bold text-slate-900 my-0.5">0.0°</span>
+                        <span id="acc-x" class="text-[10px] font-mono font-bold text-red-700">0.00 m/s²</span>
+                    </div>
+                    <!-- Pitch (Y Axis) -->
+                    <div class="bg-emerald-50/80 p-2.5 rounded-xl border border-emerald-200 flex flex-col items-center">
+                        <span class="text-[10px] font-bold text-emerald-700 uppercase tracking-wider">Y - Pitch</span>
+                        <span id="val-pitch" class="font-orbitron text-lg font-bold text-slate-900 my-0.5">0.0°</span>
+                        <span id="acc-y" class="text-[10px] font-mono font-bold text-emerald-700">0.00 m/s²</span>
+                    </div>
+                </div>
+
+                <!-- Artificial Horizon Widget -->
+                <div class="bg-slate-50 p-2.5 rounded-xl border border-slate-200 flex items-center justify-between">
+                    <div class="flex items-center gap-3">
+                        <div id="horizon-container">
+                            <div id="horizon-sky"></div>
+                            <div id="horizon-crosshair"></div>
+                            <div id="horizon-ring"></div>
+                        </div>
+                        <div>
+                            <div class="text-xs font-bold text-slate-800">Artificial Horizon</div>
+                            <div class="text-[11px] text-slate-500 font-medium">Flight Attitude Indicator</div>
+                            <div id="total-g" class="text-[10px] font-mono font-bold text-sky-700 mt-1">1.00 G (9.81 m/s²)</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Sliders and Numerical Input Section -->
+            <div class="p-4 space-y-3">
+                <h2 class="font-orbitron text-xs font-bold tracking-wider text-slate-800 uppercase flex items-center gap-2">
+                    <i class="fa-solid fa-sliders text-sky-600"></i> Precision Controls
+                </h2>
+
+                <!-- Z Axis Control (Yaw) -->
+                <div class="space-y-1">
+                    <div class="flex justify-between items-center text-xs">
+                        <label for="slider-yaw" class="font-bold text-blue-600 flex items-center gap-1.5">
+                            <i class="fa-solid fa-arrows-spin"></i> Yaw (Z-Axis Spin)
+                        </label>
+                        <div class="flex items-center gap-1">
+                            <input type="number" id="num-yaw" min="-180" max="180" value="0" 
+                                class="w-16 px-1.5 py-0.5 text-right font-mono text-xs border border-slate-300 rounded font-bold text-slate-800">
+                            <span class="text-slate-500 font-bold">°</span>
+                        </div>
+                    </div>
+                    <input type="range" id="slider-yaw" min="-180" max="180" value="0" 
+                        class="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-blue-600">
+                </div>
+
+                <!-- X Axis Control (Roll) -->
+                <div class="space-y-1">
+                    <div class="flex justify-between items-center text-xs">
+                        <label for="slider-roll" class="font-bold text-red-600 flex items-center gap-1.5">
+                            <i class="fa-solid fa-rotate-right"></i> Roll (X-Axis Tilt)
+                        </label>
+                        <div class="flex items-center gap-1">
+                            <input type="number" id="num-roll" min="-180" max="180" value="0" 
+                                class="w-16 px-1.5 py-0.5 text-right font-mono text-xs border border-slate-300 rounded font-bold text-slate-800">
+                            <span class="text-slate-500 font-bold">°</span>
+                        </div>
+                    </div>
+                    <input type="range" id="slider-roll" min="-180" max="180" value="0" 
+                        class="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-red-600">
+                </div>
+
+                <!-- Y Axis Control (Pitch) -->
+                <div class="space-y-1">
+                    <div class="flex justify-between items-center text-xs">
+                        <label for="slider-pitch" class="font-bold text-emerald-600 flex items-center gap-1.5">
+                            <i class="fa-solid fa-arrows-up-down"></i> Pitch (Y-Axis Tilt)
+                        </label>
+                        <div class="flex items-center gap-1">
+                            <input type="number" id="num-pitch" min="-180" max="180" value="0" 
+                                class="w-16 px-1.5 py-0.5 text-right font-mono text-xs border border-slate-300 rounded font-bold text-slate-800">
+                            <span class="text-slate-500 font-bold">°</span>
+                        </div>
+                    </div>
+                    <input type="range" id="slider-pitch" min="-180" max="180" value="0" 
+                        class="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-emerald-600">
+                </div>
+            </div>
+
+            <!-- Accelerometer Streaming Chart -->
+            <div class="p-4 flex-1 flex flex-col min-h-[220px]">
+                <div class="flex items-center justify-between mb-2">
+                    <h2 class="font-orbitron text-xs font-bold tracking-wider text-slate-800 uppercase flex items-center gap-2">
+                        <i class="fa-solid fa-chart-line text-sky-600"></i> Dynamic Sensor Stream
+                    </h2>
+                    <span class="text-[10px] font-bold text-slate-500">m/s² vs Time</span>
+                </div>
+                <div class="flex-1 min-h-[160px] bg-slate-50 rounded-xl p-2 border border-slate-200">
+                    <canvas id="telemetryChart"></canvas>
+                </div>
+            </div>
+        </aside>
+    </div>
+
+    <!-- Educational Modal Guide -->
+    <div id="modal-guide" class="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden">
+        <div class="bg-white border border-slate-200 rounded-2xl max-w-xl w-full p-6 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto">
+            <div class="flex justify-between items-center border-b border-slate-200 pb-3">
+                <h3 class="font-orbitron text-base font-bold text-sky-700 flex items-center gap-2">
+                    <i class="fa-solid fa-book-open"></i> CanSat Satellite Axis Reference
+                </h3>
+                <button id="btn-close-modal" class="text-slate-400 hover:text-slate-700 p-1">
+                    <i class="fa-solid fa-xmark text-lg"></i>
+                </button>
+            </div>
+
+            <div class="space-y-3 text-xs text-slate-600 leading-relaxed">
+                <p>In aerospace physics, the onboard 3-axis accelerometer and gyroscope measure real-time rotation and gravitational decomposition:</p>
+
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-2.5 pt-1">
+                    <div class="bg-blue-50/80 p-2.5 rounded-xl border border-blue-200">
+                        <h4 class="font-bold text-blue-700 text-xs mb-1 flex items-center gap-1">
+                            <span class="w-2 h-2 rounded-full bg-blue-600"></span> Z-Axis (Yaw)
+                        </h4>
+                        <p class="text-[11px] text-slate-700">Central vertical axis. Rotating around Z spins the CanSat in place upright (like twisting the antenna line).</p>
+                    </div>
+
+                    <div class="bg-red-50/80 p-2.5 rounded-xl border border-red-200">
+                        <h4 class="font-bold text-red-700 text-xs mb-1 flex items-center gap-1">
+                            <span class="w-2 h-2 rounded-full bg-red-500"></span> X-Axis (Roll)
+                        </h4>
+                        <p class="text-[11px] text-slate-700">Horizontal lateral axis. Tilting side-to-side changes the X-axis acceleration component.</p>
+                    </div>
+
+                    <div class="bg-emerald-50/80 p-2.5 rounded-xl border border-emerald-200">
+                        <h4 class="font-bold text-emerald-700 text-xs mb-1 flex items-center gap-1">
+                            <span class="w-2 h-2 rounded-full bg-emerald-600"></span> Y-Axis (Pitch)
+                        </h4>
+                        <p class="text-[11px] text-slate-700">Horizontal axis. Tilting the satellite forward or backward alters the Y-axis acceleration component.</p>
+                    </div>
+                </div>
+
+                <div class="bg-sky-50 border border-sky-200 p-3 rounded-xl space-y-1">
+                    <h4 class="font-bold text-sky-800 text-xs flex items-center gap-1.5">
+                        <i class="fa-solid fa-lightbulb text-amber-500"></i> Acceleration Equations (m/s²):
+                    </h4>
+                    <p class="font-mono text-[11px] text-slate-800">
+                        A<sub>x</sub> = -g &middot; sin(Roll) &middot; cos(Pitch)<br>
+                        A<sub>y</sub> = g &middot; sin(Pitch)<br>
+                        A<sub>z</sub> = g &middot; cos(Roll) &middot; cos(Pitch) &nbsp;&nbsp;(g = 9.81 m/s²)
+                    </p>
+                </div>
+            </div>
+
+            <div class="pt-2 text-right">
+                <button id="btn-close-modal-2" class="px-4 py-2 bg-sky-600 hover:bg-sky-500 text-white rounded-xl text-xs font-semibold transition shadow-sm">
+                    Close & Start Exploring
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Application Script -->
+    <script>
+        // State Management
+        const state = {
+            roll: 0,    // X-axis (deg)
+            pitch: 0,   // Y-axis (deg)
+            yaw: 0,     // Z-axis (deg)
+            interactionMode: 'rotate', // 'rotate' or 'orbit'
+            demoMode: null, // 'yaw', 'roll', 'pitch' or null
+            isDraggingModel: false,
+            showFrame: true,
+            previousMousePosition: { x: 0, y: 0 }
+        };
+
+        // DOM Elements
+        const container = document.getElementById('canvas-container');
+        const sliderRoll = document.getElementById('slider-roll');
+        const sliderPitch = document.getElementById('slider-pitch');
+        const sliderYaw = document.getElementById('slider-yaw');
+        const numRoll = document.getElementById('num-roll');
+        const numPitch = document.getElementById('num-pitch');
+        const numYaw = document.getElementById('num-yaw');
+
+        const valRoll = document.getElementById('val-roll');
+        const valPitch = document.getElementById('val-pitch');
+        const valYaw = document.getElementById('val-yaw');
+        const accXEl = document.getElementById('acc-x');
+        const accYEl = document.getElementById('acc-y');
+        const accZEl = document.getElementById('acc-z');
+        const totalGEl = document.getElementById('total-g');
+
+        const horizonSky = document.getElementById('horizon-sky');
+
+        // Three.js Globals
+        let scene, camera, renderer, controls;
+        let satelliteRootGroup, satelliteBodyGroup, innerComponentsGroup, axisGizmoGroup, frameCageGroup;
+        let raycaster, mouse;
+
+        function initThreeJS() {
+            scene = new THREE.Scene();
+
+            // Perspective Camera
+            camera = new THREE.PerspectiveCamera(42, container.clientWidth / container.clientHeight, 0.1, 1000);
+            camera.position.set(0, 8, 20);
+
+            // WebGL Renderer with anti-aliasing
+            renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+            renderer.setSize(container.clientWidth, container.clientHeight);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+            renderer.shadowMap.enabled = true;
+            container.appendChild(renderer.domElement);
+
+            // Orbit Controls
+            controls = new THREE.OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+            controls.dampingFactor = 0.05;
+            controls.maxDistance = 40;
+            controls.minDistance = 6;
+            controls.enabled = false; // Default mode is direct rotate
+
+            raycaster = new THREE.Raycaster();
+            mouse = new THREE.Vector2();
+
+            // Lighting Setup
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.85);
+            scene.add(ambientLight);
+
+            const dirLight1 = new THREE.DirectionalLight(0xffffff, 0.7);
+            dirLight1.position.set(12, 20, 15);
+            scene.add(dirLight1);
+
+            const dirLight2 = new THREE.DirectionalLight(0xbae6fd, 0.4);
+            dirLight2.position.set(-12, -10, -10);
+            scene.add(dirLight2);
+
+            // Floor Polar Grid Plane
+            const polarGrid = new THREE.PolarGridHelper(16, 16, 8, 64, 0x0284c7, 0xcbd5e1);
+            polarGrid.position.y = -6.0;
+            scene.add(polarGrid);
+
+            // Build Satellite Geometry
+            buildSatelliteModel();
+
+            // Event Listeners
+            window.addEventListener('resize', onWindowResize);
+            renderer.domElement.addEventListener('pointerdown', onPointerDown);
+            renderer.domElement.addEventListener('pointermove', onPointerMove);
+            renderer.domElement.addEventListener('pointerup', onPointerUp);
+        }
+
+        // Construct 3D CanSat Model
+        function buildSatelliteModel() {
+            satelliteRootGroup = new THREE.Group();
+            satelliteBodyGroup = new THREE.Group();
+            innerComponentsGroup = new THREE.Group();
+
+            // Materials
+            const clearAcrylicMat = new THREE.MeshPhysicalMaterial({
+                color: 0xffffff,
+                transparent: true,
+                opacity: 0.38,
+                roughness: 0.1,
+                transmission: 0.85,
+                thickness: 0.5,
+                ior: 1.49
+            });
+
+            const pcbMat = new THREE.MeshStandardMaterial({ color: 0x047857, roughness: 0.4, metalness: 0.2 });
+            const darkMetalMat = new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.3, metalness: 0.8 });
+            const goldMat = new THREE.MeshStandardMaterial({ color: 0xd97706, roughness: 0.2, metalness: 0.9 });
+            const metalMat = new THREE.MeshStandardMaterial({ color: 0x94a3b8, metalness: 0.9, roughness: 0.2 });
+
+            // Acrylic Outer Casing Cylinder
+            const outerCylinderGeo = new THREE.CylinderGeometry(2.5, 2.5, 6.8, 32);
+            const outerCylinder = new THREE.Mesh(outerCylinderGeo, clearAcrylicMat);
+            satelliteBodyGroup.add(outerCylinder);
+
+            // Top & Bottom End Cap PCBs
+            const topCapGeo = new THREE.CylinderGeometry(2.55, 2.55, 0.12, 32);
+            const topCap = new THREE.Mesh(topCapGeo, darkMetalMat);
+            topCap.position.y = 3.4;
+            satelliteBodyGroup.add(topCap);
+
+            const bottomCap = new THREE.Mesh(topCapGeo, darkMetalMat);
+            bottomCap.position.y = -3.4;
+            satelliteBodyGroup.add(bottomCap);
+
+            // Antenna (MOUNTED OFF-CENTER near top edge)
+            const antennaOffsetRadius = 1.7;
+            const antennaAngle = Math.PI * 0.25;
+            const antX = Math.cos(antennaAngle) * antennaOffsetRadius;
+            const antZ = Math.sin(antennaAngle) * antennaOffsetRadius;
+
+            const antBaseGeo = new THREE.CylinderGeometry(0.2, 0.25, 0.5, 16);
+            const antBase = new THREE.Mesh(antBaseGeo, darkMetalMat);
+            antBase.position.set(antX, 3.65, antZ);
+            satelliteBodyGroup.add(antBase);
+
+            const antRodGeo = new THREE.CylinderGeometry(0.08, 0.08, 4.2, 16);
+            const antRodMat = new THREE.MeshStandardMaterial({ color: 0x0f172a, roughness: 0.2 });
+            const antRod = new THREE.Mesh(antRodGeo, antRodMat);
+            antRod.position.set(antX, 5.8, antZ);
+            satelliteBodyGroup.add(antRod);
+
+            // USB Port and Power Switch on top plate
+            const usbPortGeo = new THREE.BoxGeometry(0.7, 0.25, 0.4);
+            const usbPort = new THREE.Mesh(usbPortGeo, metalMat);
+            usbPort.position.set(-antX, 3.5, antZ);
+            satelliteBodyGroup.add(usbPort);
+
+            const switchBaseGeo = new THREE.BoxGeometry(0.8, 0.3, 0.4);
+            const switchBase = new THREE.Mesh(switchBaseGeo, darkMetalMat);
+            switchBase.position.set(0, 3.5, -1.6);
+            satelliteBodyGroup.add(switchBase);
+
+            const switchToggleGeo = new THREE.BoxGeometry(0.25, 0.35, 0.25);
+            const switchToggle = new THREE.Mesh(switchToggleGeo, metalMat);
+            switchToggle.position.set(-0.15, 3.7, -1.6);
+            satelliteBodyGroup.add(switchToggle);
+
+            // Rubber Band
+            const bandGeo = new THREE.TorusGeometry(2.52, 0.08, 12, 32);
+            const bandMat = new THREE.MeshStandardMaterial({ color: 0xd97706, roughness: 0.8 });
+            const rubberBand = new THREE.Mesh(bandGeo, bandMat);
+            rubberBand.rotation.x = Math.PI / 2;
+            rubberBand.position.y = -1.0;
+            satelliteBodyGroup.add(rubberBand);
+
+            // Internal Circuitry Stack
+            for (let yOffset of [-2.0, 0.0, 2.0]) {
+                const pcbDisk = new THREE.Mesh(new THREE.CylinderGeometry(2.3, 2.3, 0.12, 32), pcbMat);
+                pcbDisk.position.y = yOffset;
+                innerComponentsGroup.add(pcbDisk);
+            }
+
+            // Central Brass Posts
+            for (let angle of [0, Math.PI/2, Math.PI, Math.PI*1.5]) {
+                const rod = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 6.6, 12), goldMat);
+                rod.position.set(Math.cos(angle)*2.1, 0, Math.sin(angle)*2.1);
+                innerComponentsGroup.add(rod);
+            }
+
+            // Lithium Batteries
+            const battGeo = new THREE.CylinderGeometry(0.5, 0.5, 2.2, 16);
+            const battMat = new THREE.MeshStandardMaterial({ color: 0x2563eb, roughness: 0.3 });
+            const batt1 = new THREE.Mesh(battGeo, battMat);
+            batt1.position.set(-0.8, -0.8, 0.6);
+            innerComponentsGroup.add(batt1);
+
+            const batt2 = batt1.clone();
+            batt2.position.set(-0.8, 0.8, 0.6);
+            innerComponentsGroup.add(batt2);
+
+            // Status LEDs
+            const ledGeo = new THREE.SphereGeometry(0.12, 16, 16);
+            const greenLed = new THREE.Mesh(ledGeo, new THREE.MeshBasicMaterial({ color: 0x10b981 }));
+            greenLed.position.set(1.2, 1.0, 0.5);
+            innerComponentsGroup.add(greenLed);
+
+            const redLed = new THREE.Mesh(ledGeo, new THREE.MeshBasicMaterial({ color: 0xef4444 }));
+            redLed.position.set(1.2, 0.7, 0.5);
+            innerComponentsGroup.add(redLed);
+
+            satelliteBodyGroup.add(innerComponentsGroup);
+
+            // Structural Frame Cage ("框") Overlay
+            frameCageGroup = new THREE.Group();
+
+            const boxGeo = new THREE.BoxGeometry(5.4, 7.2, 5.4);
+            const boxEdges = new THREE.EdgesGeometry(boxGeo);
+            const lineMat = new THREE.LineBasicMaterial({ color: 0x2563eb, linewidth: 2 });
+            const boxFrame = new THREE.LineSegments(boxEdges, lineMat);
+            frameCageGroup.add(boxFrame);
+
+            const cylWireGeo = new THREE.CylinderGeometry(2.65, 2.65, 7.0, 16, 3, true);
+            const cylWireMat = new THREE.MeshBasicMaterial({ color: 0x4f46e5, wireframe: true, transparent: true, opacity: 0.3 });
+            const cylWireMesh = new THREE.Mesh(cylWireGeo, cylWireMat);
+            frameCageGroup.add(cylWireMesh);
+
+            const cornerGeo = new THREE.BoxGeometry(0.3, 0.3, 0.3);
+            const cornerMat = new THREE.MeshStandardMaterial({ color: 0x4f46e5, metalness: 0.8 });
+            for (let x of [-2.7, 2.7]) {
+                for (let y of [-3.6, 3.6]) {
+                    for (let z of [-2.7, 2.7]) {
+                        const corner = new THREE.Mesh(cornerGeo, cornerMat);
+                        corner.position.set(x, y, z);
+                        frameCageGroup.add(corner);
+                    }
+                }
+            }
+            satelliteBodyGroup.add(frameCageGroup);
+
+            // Coordinate Vector Gizmo
+            axisGizmoGroup = new THREE.Group();
+            const axisLength = 5.2;
+
+            // Z-Axis (Blue - Yaw) - Upward central axis
+            const zArrow = new THREE.ArrowHelper(new THREE.Vector3(0, 1, 0), new THREE.Vector3(0, 0, 0), axisLength + 2.5, 0x2563eb, 0.8, 0.4);
+            axisGizmoGroup.add(zArrow);
+
+            // X-Axis (Red - Roll) - Lateral axis
+            const xArrow = new THREE.ArrowHelper(new THREE.Vector3(1, 0, 0), new THREE.Vector3(0, 0, 0), axisLength, 0xdc2626, 0.8, 0.4);
+            axisGizmoGroup.add(xArrow);
+
+            // Y-Axis (Green - Pitch) - Longitudinal axis
+            const yArrow = new THREE.ArrowHelper(new THREE.Vector3(0, 0, 1), new THREE.Vector3(0, 0, 0), axisLength, 0x059669, 0.8, 0.4);
+            axisGizmoGroup.add(yArrow);
+
+            satelliteBodyGroup.add(axisGizmoGroup);
+
+            satelliteRootGroup.add(satelliteBodyGroup);
+            scene.add(satelliteRootGroup);
+        }
+
+        // Pointer event handlers for direct mouse rotation on left panel
+        function onPointerDown(e) {
+            if (state.interactionMode !== 'rotate') return;
+
+            const rect = renderer.domElement.getBoundingClientRect();
+            mouse.x = ((e.clientX - rect.left) / container.clientWidth) * 2 - 1;
+            mouse.y = -((e.clientY - rect.top) / container.clientHeight) * 2 + 1;
+
+            raycaster.setFromCamera(mouse, camera);
+            const intersects = raycaster.intersectObjects(satelliteBodyGroup.children, true);
+
+            if (intersects.length > 0) {
+                state.isDraggingModel = true;
+                state.demoMode = null;
+                state.previousMousePosition = { x: e.clientX, y: e.clientY };
+            }
+        }
+
+        function onPointerMove(e) {
+            if (!state.isDraggingModel || state.interactionMode !== 'rotate') return;
+
+            const deltaX = e.clientX - state.previousMousePosition.x;
+            const deltaY = e.clientY - state.previousMousePosition.y;
+
+            const sensitivity = 0.6;
+
+            let newYaw = state.yaw + deltaX * sensitivity;
+            let newPitch = state.pitch + deltaY * sensitivity;
+
+            if (newYaw > 180) newYaw -= 360;
+            if (newYaw < -180) newYaw += 360;
+            if (newPitch > 180) newPitch -= 360;
+            if (newPitch < -180) newPitch += 360;
+
+            state.yaw = Math.round(newYaw);
+            state.pitch = Math.round(newPitch);
+
+            updateControlsAndSatellite();
+
+            state.previousMousePosition = { x: e.clientX, y: e.clientY };
+        }
+
+        function onPointerUp() {
+            state.isDraggingModel = false;
+        }
+
+        // Update Orientation Quaternion and Real-time Telemetry Calculations
+        function updateControlsAndSatellite() {
+            const radX = THREE.MathUtils.degToRad(state.roll);  // Roll
+            const radY = THREE.MathUtils.degToRad(state.pitch); // Pitch
+            const radZ = THREE.MathUtils.degToRad(state.yaw);   // Yaw
+
+            // Apply Euler rotation with intrinsic YXZ order (Yaw spins central vertical axis)
+            const euler = new THREE.Euler(radX, radZ, radY, 'YXZ');
+            satelliteBodyGroup.quaternion.setFromEuler(euler);
+
+            // Synchronize Sliders
+            sliderRoll.value = state.roll;
+            sliderPitch.value = state.pitch;
+            sliderYaw.value = state.yaw;
+
+            // Synchronize Numerical Inputs
+            numRoll.value = Math.round(state.roll);
+            numPitch.value = Math.round(state.pitch);
+            numYaw.value = Math.round(state.yaw);
+
+            // Synchronize Labels
+            valRoll.textContent = `${state.roll.toFixed(1)}°`;
+            valPitch.textContent = `${state.pitch.toFixed(1)}°`;
+            valYaw.textContent = `${state.yaw.toFixed(1)}°`;
+
+            // Calculate Accelerometer Gravity Components (g = 9.81 m/s²)
+            // Ax = -g * sin(Roll) * cos(Pitch)
+            // Ay = g * sin(Pitch)
+            // Az = g * cos(Roll) * cos(Pitch)
+            const g = 9.81;
+            const ax = -g * Math.sin(radX) * Math.cos(radY);
+            const ay = g * Math.sin(radY);
+            const az = g * Math.cos(radX) * Math.cos(radY);
+
+            accXEl.textContent = `${ax.toFixed(2)} m/s²`;
+            accYEl.textContent = `${ay.toFixed(2)} m/s²`;
+            accZEl.textContent = `${az.toFixed(2)} m/s²`;
+
+            const totalG = Math.sqrt(ax*ax + ay*ay + az*az) / g;
+            totalGEl.textContent = `${totalG.toFixed(2)} G (${(totalG * g).toFixed(2)} m/s²)`;
+
+            // Update Artificial Horizon View
+            horizonSky.style.transform = `translate(-50%, -50%) rotate(${-state.roll}deg) translateY(${state.pitch * 0.35}px)`;
+
+            // Chart update
+            pushChartData(ax, ay, az);
+        }
+
+        function onWindowResize() {
+            camera.aspect = container.clientWidth / container.clientHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(container.clientWidth, container.clientHeight);
+        }
+
+        // Real-Time Chart.js Initialization
+        let telemetryChart;
+        function initChart() {
+            const ctx = document.getElementById('telemetryChart').getContext('2d');
+            telemetryChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: Array(30).fill(''),
+                    datasets: [
+                        { label: 'Acc X (Roll)', borderColor: '#dc2626', data: Array(30).fill(0), borderWidth: 2, pointRadius: 0, tension: 0.25 },
+                        { label: 'Acc Y (Pitch)', borderColor: '#059669', data: Array(30).fill(0), borderWidth: 2, pointRadius: 0, tension: 0.25 },
+                        { label: 'Acc Z (Yaw)', borderColor: '#2563eb', data: Array(30).fill(9.81), borderWidth: 2, pointRadius: 0, tension: 0.25 }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    animation: false,
+                    scales: {
+                        x: { display: false },
+                        y: { 
+                            min: -12, 
+                            max: 12, 
+                            grid: { color: '#e2e8f0' }, 
+                            ticks: { color: '#64748b', font: { size: 9, weight: '600' } } 
+                        }
+                    },
+                    plugins: {
+                        legend: { labels: { color: '#334155', font: { size: 10, weight: '600' }, boxWidth: 8 } }
+                    }
+                }
+            });
+        }
+
+        function pushChartData(ax, ay, az) {
+            if (!telemetryChart) return;
+            const datasets = telemetryChart.data.datasets;
+            
+            datasets[0].data.shift(); datasets[0].data.push(ax);
+            datasets[1].data.shift(); datasets[1].data.push(ay);
+            datasets[2].data.shift(); datasets[2].data.push(az);
+
+            telemetryChart.update();
+        }
+
+        // Main Animation Loop
+        function animate() {
+            requestAnimationFrame(animate);
+
+            if (state.demoMode === 'yaw') {
+                state.yaw = (state.yaw + 1.8) % 360;
+                if (state.yaw > 180) state.yaw -= 360;
+                updateControlsAndSatellite();
+            } else if (state.demoMode === 'roll') {
+                state.roll = Math.sin(Date.now() * 0.003) * 45;
+                updateControlsAndSatellite();
+            } else if (state.demoMode === 'pitch') {
+                state.pitch = Math.sin(Date.now() * 0.003) * 45;
+                updateControlsAndSatellite();
+            }
+
+            controls.update();
+            renderer.render(scene, camera);
+        }
+
+        // Setup UI Event Handlers
+        function setupUIEventListeners() {
+            // Sliders & Numeric Inputs Sync
+            const bindControlPair = (slider, numInput, stateProp) => {
+                slider.addEventListener('input', (e) => {
+                    state[stateProp] = parseFloat(e.target.value);
+                    state.demoMode = null;
+                    updateControlsAndSatellite();
+                });
+
+                numInput.addEventListener('change', (e) => {
+                    let val = parseFloat(e.target.value) || 0;
+                    if (val > 180) val = 180;
+                    if (val < -180) val = -180;
+                    state[stateProp] = val;
+                    state.demoMode = null;
+                    updateControlsAndSatellite();
+                });
+            };
+
+            bindControlPair(sliderRoll, numRoll, 'roll');
+            bindControlPair(sliderPitch, numPitch, 'pitch');
+            bindControlPair(sliderYaw, numYaw, 'yaw');
+
+            const btnRotate = document.getElementById('mode-rotate');
+            const btnOrbit = document.getElementById('mode-orbit');
+            const hintTitle = document.getElementById('interaction-hint-title');
+            const hintDesc = document.getElementById('interaction-hint-desc');
+
+            btnRotate.addEventListener('click', () => {
+                state.interactionMode = 'rotate';
+                controls.enabled = false;
+                btnRotate.className = "px-3 py-1.5 rounded-lg text-xs font-bold bg-sky-600 text-white transition flex items-center gap-1.5 shadow";
+                btnOrbit.className = "px-3 py-1.5 rounded-lg text-xs font-bold bg-slate-100 hover:bg-slate-200 text-slate-700 transition flex items-center gap-1.5 border border-slate-300";
+                hintTitle.textContent = "Mode: Rotate CanSat";
+                hintDesc.textContent = "Left-click and drag directly on the CanSat to rotate! Drag horizontally to turn Yaw (Z), drag vertically to adjust Pitch (Y).";
+            });
+
+            btnOrbit.addEventListener('click', () => {
+                state.interactionMode = 'orbit';
+                controls.enabled = true;
+                btnOrbit.className = "px-3 py-1.5 rounded-lg text-xs font-bold bg-sky-600 text-white transition flex items-center gap-1.5 shadow";
+                btnRotate.className = "px-3 py-1.5 rounded-lg text-xs font-bold bg-slate-100 hover:bg-slate-200 text-slate-700 transition flex items-center gap-1.5 border border-slate-300";
+                hintTitle.textContent = "Mode: Orbit Camera";
+                hintDesc.textContent = "Left-click & drag anywhere on the 3D window to orbit camera around the satellite. Scroll to zoom in/out.";
+            });
+
+            document.getElementById('btn-demo-yaw').addEventListener('click', () => {
+                state.demoMode = state.demoMode === 'yaw' ? null : 'yaw';
+            });
+
+            document.getElementById('btn-demo-roll').addEventListener('click', () => {
+                state.demoMode = state.demoMode === 'roll' ? null : 'roll';
+            });
+
+            document.getElementById('btn-demo-pitch').addEventListener('click', () => {
+                state.demoMode = state.demoMode === 'pitch' ? null : 'pitch';
+            });
+
+            document.getElementById('btn-reset').addEventListener('click', () => {
+                state.demoMode = null;
+                state.roll = 0; state.pitch = 0; state.yaw = 0;
+                updateControlsAndSatellite();
+            });
+
+            document.getElementById('toggle-frame').addEventListener('click', () => {
+                state.showFrame = !state.showFrame;
+                frameCageGroup.visible = state.showFrame;
+            });
+
+            const guideModal = document.getElementById('modal-guide');
+            document.getElementById('btn-guide').addEventListener('click', () => guideModal.classList.remove('hidden'));
+            document.getElementById('btn-close-modal').addEventListener('click', () => guideModal.classList.add('hidden'));
+            document.getElementById('btn-close-modal-2').addEventListener('click', () => guideModal.classList.add('hidden'));
+        }
+
+        // Initializer
+        window.onload = function() {
+            initThreeJS();
+            initChart();
+            setupUIEventListeners();
+            updateControlsAndSatellite();
+            animate();
+        };
+    </script>
+</body>
+</html>
